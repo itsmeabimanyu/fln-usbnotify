@@ -2,6 +2,7 @@
 import datetime
 import getpass
 import os
+import pwd
 import platform
 import socket
 import subprocess
@@ -104,7 +105,34 @@ def send_email(body, save_if_failed=True):
             save_failed_email(body)
         return False
 
-TEMP_DIR = Path.home() / ".cache" / "temp_dir"
+
+def get_home_dir(username):
+    current_os = platform.system()
+    if current_os == "Windows":
+        # Di Windows, kita biasanya cukup pakai Path.home()
+        return Path.home()
+    elif current_os in ["Linux", "Darwin"]:
+        try:
+            return Path(pwd.getpwnam(username).pw_dir)
+        except Exception:
+            return None
+    else:
+        return None
+
+def get_temp_dir():
+    username = get_logged_in_user()
+    if username:
+        home_dir = get_home_dir(username)
+        if home_dir:
+            temp_dir = home_dir / ".cache" / "temp_dir"
+            return temp_dir
+
+    # fallback pakai Path.home() (home user proses saat ini)
+    return Path.home() / ".cache" / "temp_dir"
+
+# Usage example
+TEMP_DIR = get_temp_dir()
+
 def save_failed_email(body):
     os.makedirs(TEMP_DIR, exist_ok=True)
     # Timestamp tanpa karakter ilegal (ganti ':' dengan '-')
