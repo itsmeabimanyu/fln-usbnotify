@@ -1,0 +1,60 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# === Virtual Environments ===
+venv/
+.env/
+.venv/
+ENV/
+env/
+
+# === Django-specific ===
+*.log
+db.sqlite3
+media/
+staticfiles/
+local_settings.py
+
+# === Packaging / Distribution ===
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg
+*.egg-info/
+.installed.cfg
+MANIFEST
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# === OS-specific ===
+.DS_Store
+Thumbs.db
+
+# === dotenv ===
+.env
+.env.local
+.env.*.local
+
+# === Coverage / Testing ===
+htmlcov/
+.tox/
+.nox/
+.coverage
+coverage.xml
+.pytest_cache/
