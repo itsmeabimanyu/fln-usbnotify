@@ -1,20 +1,26 @@
-import os
-import time
+# Built-in modules
 import datetime
-import threading
-import subprocess
-import socket
-import uuid
-import platform
 import getpass
+import os
+import platform
+import socket
+import subprocess
+import threading
+import time
+import uuid
 
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import smtplib
-
+# Third-party modules
 import psutil
 import schedule
+import smtplib
 from dotenv import load_dotenv
+
+# Email modules (built-in, tapi spesifik)
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+# Standard library pathlib
+from pathlib import Path
 
 current_os = platform.system()
 # Import hanya jika di Windows
@@ -27,7 +33,6 @@ if current_os == "Windows":
 
 # Memuat isi dari file .env
 load_dotenv()
-TEMP_DIR = "media"
     
 def get_logged_in_user():
     try:
@@ -99,15 +104,19 @@ def send_email(body, save_if_failed=True):
             save_failed_email(body)
         return False
 
+TEMP_DIR = Path.home() / ".cache" / "temp_dir"
 def save_failed_email(body):
     os.makedirs(TEMP_DIR, exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    filename = f"{TEMP_DIR}/email_{timestamp}.txt"
-
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(body)
-
-    print(f"Failed to save email to: {filename}")
+    # Timestamp tanpa karakter ilegal (ganti ':' dengan '-')
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = TEMP_DIR / f"email_{timestamp}.txt"
+    
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(body)
+        print(f"Failed email content saved to: {filename}")
+    except Exception as e:
+        print(f"Error saving failed email: {e}")
 
 # gabung body jadi satu email
 def resend_failed_emails():
@@ -269,7 +278,7 @@ def win_monitor_usb():
             break
 
 def schedule_runner():
-    schedule.every(10).seconds.do(resend_failed_emails)
+    schedule.every(1).hours.do(resend_failed_emails)
 
     while True:
         schedule.run_pending()

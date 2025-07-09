@@ -4,7 +4,7 @@
 pip install psutil python-dotenv schedule
 ```
 
-### Additional Dependencies
+## Additional Dependencies
 
 - for Linux 
 
