@@ -76,15 +76,66 @@ def get_info():
     except:
         mac = 'Not found'
 
-    return hostname, ip, mac
+    ip_is_illegal = ip and not ip.startswith(os.getenv("VALID_IP_PREFIX"))
+    return hostname, ip, mac, ip_is_illegal
 
-def send_email(body, save_if_failed=True):
+# Deteksi dan Tindakan Jika IP Tidak Sah
+def check_illegal_ip(prev_ip=None):
+    user = get_logged_in_user()
+    waktu = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    hostname, ip, mac, ip_is_illegal = get_info()
+    # Abaikan jika IP belum ditemukan
+    if ip == "Not found":
+        return prev_ip
+
+    # Jika IP belum berubah, tidak perlu log ulang
+    if prev_ip == ip:
+        return ip
+
+    if ip_is_illegal:
+        print(f"\n[ALERT] IP Tidak Sah Terdeteksi!")
+        print(f"Hostname : {hostname}")
+        print(f"IP       : {ip}")
+        print(f"MAC      : {mac}")
+        print(f"OS       : {current_os}")
+        html = f"""
+        <html>
+        <body>
+            <p><strong>[ALERT]</strong> Unauthorized IP detected at <strong>{waktu}</strong> by user: <strong>{user}</strong></p>
+            <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 14px;">
+            <tr style="background-color: #f2f2f2;">
+                <th align="left">Field</th>
+                <th align="left">Value</th>
+            </tr>
+            <tr><td>Hostname</td><td>{hostname}</td></tr>
+            <tr><td>IP Address</td><td>{ip}</td></tr>
+            <tr><td>MAC Address</td><td>{mac}</td></tr>
+            <tr><td>OS</td><td>{current_os}</td></tr>
+            </table>
+        </body>
+        </html>
+        """
+        # Kirim email alert
+        send_email("🚨 Alert: Unauthorized IP Detected", html, save_if_failed=False)
+    else:
+        print(f"[OK] IP valid: {ip}")
+
+    return ip
+
+def ip_monitor_loop():
+    print("[INFO] Memulai pemantauan IP (loop polling)...")
+    previous_ip = None
+    while True:
+        previous_ip = check_illegal_ip(previous_ip)
+        time.sleep(5)  # Cek setiap 5 detik
+
+def send_email(subject, body, save_if_failed=True):
     from_email = os.getenv("EMAIL_HOST_USER")
     password = os.getenv("EMAIL_HOST_PASSWORD")
     to_email = os.getenv("TO_EMAIL")
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "🔔 Alert: USB Device Connection Detected"
+    msg["Subject"] = subject
     msg["From"] = from_email
     msg["To"] = to_email
     msg.attach(MIMEText(body, "html"))
@@ -104,7 +155,6 @@ def send_email(body, save_if_failed=True):
         if save_if_failed:
             save_failed_email(body)
         return False
-
 
 def get_home_dir(username):
     current_os = platform.system()
@@ -169,7 +219,7 @@ def resend_failed_emails():
         return
 
     # Kirim email gabungan
-    success = send_email(combined_body, save_if_failed=False)
+    success = send_email("🚨 Alert: Unauthorized IP Detected", combined_body, save_if_failed=False)
     if success:
         # Hapus file-file yang sudah berhasil dikirim
         for file_path in files_to_delete:
@@ -198,7 +248,7 @@ def linux_monitor_usb():
                 waktu = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 user = get_logged_in_user()
                 serial = device.get('ID_SERIAL') or 'No Serial'
-                hostname, ip, mac = get_info()
+                hostname, ip, mac, ip_is_illegal = get_info()
                 
                 print(f"USB detected at {waktu} by user: {user}")
                 print("Name:", name if name else "Unknown")
@@ -234,7 +284,7 @@ def linux_monitor_usb():
                 """
 
                 # Kirim email alert
-                send_email(html)
+                send_email("🔔 Alert: USB Device Connection Detected", html)
 
         except Exception as e:
             print(f"Error occurred while processing device: {e}")
@@ -264,7 +314,7 @@ def win_monitor_usb():
             if pnp_class in ["Net", "DiskDrive", "WPD"]:
                 waktu = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 user = get_logged_in_user()
-                hostname, ip, mac = get_info()
+                hostname, ip, mac, ip_is_illegal = get_info()
 
                 print(f"USB detected at {waktu} by user: {user}")
                 print("Name:", name() if name else "Unknown")
@@ -299,7 +349,7 @@ def win_monitor_usb():
                 """
 
                 # Kirim email alert
-                send_email(html)
+                send_email("🔔 Alert: USB Device Connection Detected", html)
 
         except KeyboardInterrupt:
             print("User interrupted with Ctrl+C")
@@ -316,7 +366,15 @@ if __name__ == "__main__":
     # Jalankan scheduler di thread terpisah
     threading.Thread(target=schedule_runner, daemon=True).start()
 
+    # Jalankan pemantauan IP dalam thread
+    threading.Thread(target=ip_monitor_loop, daemon=True).start()
+
+    # Jalankan pemantauan USB berdasarkan OS
     if current_os == "Windows":
         win_monitor_usb()
     elif current_os in ["Linux", "Darwin"]:
         linux_monitor_usb()
+
+    # Simpan script tetap berjalan
+    while True:
+        time.sleep(1)
