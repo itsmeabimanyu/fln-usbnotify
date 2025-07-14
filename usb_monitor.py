@@ -2,7 +2,6 @@
 import datetime
 import getpass
 import os
-import pwd
 import platform
 import socket
 import subprocess
@@ -26,6 +25,10 @@ from pathlib import Path
 current_os = platform.system()
 # Import hanya jika di Windows
 if current_os == "Windows":
+    import win32serviceutil
+    import win32service
+    import win32event
+    import servicemanager
     try:
         import wmi
     except ImportError:
@@ -162,6 +165,7 @@ def get_home_dir(username):
         # Di Windows, kita biasanya cukup pakai Path.home()
         return Path.home()
     elif current_os in ["Linux", "Darwin"]:
+        import pwd
         try:
             return Path(pwd.getpwnam(username).pw_dir)
         except Exception:
@@ -311,14 +315,17 @@ def win_monitor_usb():
             service = getattr(device, 'Service', '')
             pnp_class = getattr(device, 'PNPClass', '')
 
-            if pnp_class in ["Net", "DiskDrive", "WPD"]:
+            if (
+                (pnp_class == "DiskDrive" and "USBSTOR" in device_id.upper()) or
+                (pnp_class in ["WPD", "Net"] and "USB" in device_id.upper())
+            ):
                 waktu = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 user = get_logged_in_user()
                 hostname, ip, mac, ip_is_illegal = get_info()
 
                 print(f"USB detected at {waktu} by user: {user}")
-                print("Name:", name() if name else "Unknown")
-                print("Manufacturer:", manufacturer() if manufacturer else "Unknown")
+                print("Name:", name if name else "Unknown")
+                print("Manufacturer:", manufacturer if manufacturer else "Unknown")
                 print("Serial:", device_id)
                 print("USB Attach Event:", pnp_class)
                 print(f"OS: {current_os}")
@@ -362,6 +369,7 @@ def schedule_runner():
         schedule.run_pending()
         time.sleep(1)
 
+'''
 if __name__ == "__main__":
     # Jalankan scheduler di thread terpisah
     threading.Thread(target=schedule_runner, daemon=True).start()
@@ -378,3 +386,41 @@ if __name__ == "__main__":
     # Simpan script tetap berjalan
     while True:
         time.sleep(1)
+'''
+
+# --- Service Class (defined at global level) ---
+if current_os == "Windows":
+
+    class USBWatcherService(win32serviceutil.ServiceFramework):
+        _svc_name_ = "USBWatcher"
+        _svc_display_name_ = "USB Watcher Python Service"
+
+        def __init__(self, args):
+            win32serviceutil.ServiceFramework.__init__(self, args)
+            self.stop_event = win32event.CreateEvent(None, 0, 0, None)
+
+        def SvcStop(self):
+            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            win32event.SetEvent(self.stop_event)
+
+        def SvcDoRun(self):
+            servicemanager.LogInfoMsg("USB Watcher Service started.")
+
+            threading.Thread(target=schedule_runner, daemon=True).start()
+            threading.Thread(target=ip_monitor_loop, daemon=True).start()
+            win_monitor_usb()
+
+            win32event.WaitForSingleObject(self.stop_event, win32event.INFINITE)
+
+# --- Entry Point ---
+if __name__ == "__main__":
+    if current_os == "Windows":
+        win32serviceutil.HandleCommandLine(USBWatcherService)
+    else:
+        # Run directly (Linux/Unix/macOS)
+        threading.Thread(target=schedule_runner, daemon=True).start()
+        threading.Thread(target=ip_monitor_loop, daemon=True).start()
+        linux_monitor_usb()
+
+        while True:
+            time.sleep(1)
