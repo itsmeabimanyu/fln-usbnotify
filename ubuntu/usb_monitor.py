@@ -1,6 +1,5 @@
 # Built-in modules
 import datetime
-import getpass
 import os
 import platform
 import socket
@@ -8,6 +7,8 @@ import subprocess
 import threading
 import time
 import uuid
+import pwd
+import pyudev
 
 # Third-party modules
 import psutil
@@ -22,34 +23,18 @@ from email.mime.text import MIMEText
 # Standard library pathlib
 from pathlib import Path
 
-current_os = platform.system()
-# Import hanya jika di Windows
-if current_os == "Windows":
-    import win32serviceutil
-    import win32service
-    import win32event
-    import servicemanager
-    try:
-        import wmi
-    except ImportError:
-        wmi = None
-        print("Warning: wmi module not available. This code must be run on Windows.")
-
 # Memuat isi dari file .env
 load_dotenv()
+
+current_os = platform.system()
     
 def get_logged_in_user():
     try:
-        if current_os == "Windows":
-            return getpass.getuser()
-        elif current_os in ["Linux", "Darwin"]:  # Darwin = macOS
-            output = subprocess.check_output(['who']).decode().strip()
-            if output:
-                return output.split()[0]
-            else:
-                return "Unknown"
+        output = subprocess.check_output(['who']).decode().strip()
+        if output:
+            return output.split()[0]
         else:
-            return "Unknown OS"
+            return "Unknown"
         
     except Exception as e:
         print(f"Failed to get logged-in user: {e}")
@@ -79,7 +64,7 @@ def get_info():
     except:
         mac = 'Not found'
 
-    ip_is_illegal = ip and not ip.startswith(os.getenv("VALID_IP_PREFIX"))
+    ip_is_illegal = ip and not ip.startswith(os.getenv("VALID_IP_PREFIX", ""))
     return hostname, ip, mac, ip_is_illegal
 
 # Deteksi dan Tindakan Jika IP Tidak Sah
@@ -160,17 +145,9 @@ def send_email(subject, body, save_if_failed=True):
         return False
 
 def get_home_dir(username):
-    current_os = platform.system()
-    if current_os == "Windows":
-        # Di Windows, kita biasanya cukup pakai Path.home()
-        return Path.home()
-    elif current_os in ["Linux", "Darwin"]:
-        import pwd
-        try:
-            return Path(pwd.getpwnam(username).pw_dir)
-        except Exception:
-            return None
-    else:
+    try:
+        return Path(pwd.getpwnam(username).pw_dir)
+    except Exception:
         return None
 
 def get_temp_dir():
@@ -200,7 +177,7 @@ def save_failed_email(body):
     except Exception as e:
         print(f"Error saving failed email: {e}")
 
-# gabung body jadi satu email
+# Gabung body jadi satu email
 def resend_failed_emails():
     if not os.path.exists(TEMP_DIR):
         return
@@ -223,7 +200,7 @@ def resend_failed_emails():
         return
 
     # Kirim email gabungan
-    success = send_email("🚨 Alert: Unauthorized IP Detected", combined_body, save_if_failed=False)
+    success = send_email("🔔 Alert: USB Device Connection Detected", combined_body, save_if_failed=False)
     if success:
         # Hapus file-file yang sudah berhasil dikirim
         for file_path in files_to_delete:
@@ -235,8 +212,7 @@ def resend_failed_emails():
     else:
         print("Resend failed. Files not deleted.")
 
-def linux_monitor_usb():
-    import pyudev
+def monitor_usb():
     # print("Starting USB monitoring...")
     context = pyudev.Context()
     monitor = pyudev.Monitor.from_netlink(context)
@@ -293,134 +269,20 @@ def linux_monitor_usb():
         except Exception as e:
             print(f"Error occurred while processing device: {e}")
 
-def win_monitor_usb():
-    if wmi is None:
-        print("WMI not available. Skipping Windows USB monitor.")
-        return
-    
-    c = wmi.WMI()
-
-    watcher = c.watch_for(
-        notification_type="Creation",
-        wmi_class="Win32_PnPEntity"
-    )
-
-    while True:
-        try:
-            device = watcher()  # Tunggu perangkat baru muncul (blocking)
-            device_id = device.DeviceID
-            name = device.Name
-            manufacturer = device.Manufacturer
-
-            service = getattr(device, 'Service', '')
-            pnp_class = getattr(device, 'PNPClass', '')
-
-            if (
-                (pnp_class == "DiskDrive" and "USBSTOR" in device_id.upper()) or
-                (pnp_class in ["WPD", "Net"] and "USB" in device_id.upper())
-            ):
-                waktu = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                user = get_logged_in_user()
-                hostname, ip, mac, ip_is_illegal = get_info()
-
-                print(f"USB detected at {waktu} by user: {user}")
-                print("Name:", name if name else "Unknown")
-                print("Manufacturer:", manufacturer if manufacturer else "Unknown")
-                print("Serial:", device_id)
-                print("USB Attach Event:", pnp_class)
-                print(f"OS: {current_os}")
-                print(f"Hostname : {hostname}")
-                print(f"IP Address : {ip}")
-                print(f"MAC Address: {mac}")
-
-                html = f"""
-                <html>
-                <body>
-                    <p>USB detected at <strong>{waktu}</strong> by user: <strong>{user}</strong></p>
-                    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 14px;">
-                    <tr style="background-color: #f2f2f2;">
-                        <th align="left">Field</th>
-                        <th align="left">Value</th>
-                    </tr>
-                    <tr><td>Name</td><td>{name}</td></tr>
-                    <tr><td>Manufacturer</td><td>{manufacturer}</td></tr>
-                    <tr><td>Serial</td><td>{device_id}</td></tr>
-                    <tr><td>USB Attach Event</td><td>{pnp_class.upper()}</td></tr>
-                    <tr><td>Hostname</td><td>{hostname}</td></tr>
-                    <tr><td>IP Address</td><td>{ip}</td></tr>
-                    <tr><td>MAC Address</td><td>{mac}</td></tr>
-                    <tr><td>OS</td><td>{current_os}</td></tr>
-                    </table>
-                </body>
-                </html>
-                """
-
-                # Kirim email alert
-                send_email("🔔 Alert: USB Device Connection Detected", html)
-
-        except KeyboardInterrupt:
-            print("User interrupted with Ctrl+C")
-            break
-
 def schedule_runner():
-    schedule.every(1).hours.do(resend_failed_emails)
+    schedule.every(5).minutes.do(resend_failed_emails)
 
     while True:
         schedule.run_pending()
         time.sleep(1)
 
-'''
 if __name__ == "__main__":
     # Jalankan scheduler di thread terpisah
     threading.Thread(target=schedule_runner, daemon=True).start()
-
     # Jalankan pemantauan IP dalam thread
     threading.Thread(target=ip_monitor_loop, daemon=True).start()
-
-    # Jalankan pemantauan USB berdasarkan OS
-    if current_os == "Windows":
-        win_monitor_usb()
-    elif current_os in ["Linux", "Darwin"]:
-        linux_monitor_usb()
+    monitor_usb()
 
     # Simpan script tetap berjalan
     while True:
         time.sleep(1)
-'''
-
-# --- Service Class (defined at global level) ---
-if current_os == "Windows":
-
-    class USBWatcherService(win32serviceutil.ServiceFramework):
-        _svc_name_ = "USBWatcher"
-        _svc_display_name_ = "USB Watcher Python Service"
-
-        def __init__(self, args):
-            win32serviceutil.ServiceFramework.__init__(self, args)
-            self.stop_event = win32event.CreateEvent(None, 0, 0, None)
-
-        def SvcStop(self):
-            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-            win32event.SetEvent(self.stop_event)
-
-        def SvcDoRun(self):
-            servicemanager.LogInfoMsg("USB Watcher Service started.")
-
-            threading.Thread(target=schedule_runner, daemon=True).start()
-            threading.Thread(target=ip_monitor_loop, daemon=True).start()
-            win_monitor_usb()
-
-            win32event.WaitForSingleObject(self.stop_event, win32event.INFINITE)
-
-# --- Entry Point ---
-if __name__ == "__main__":
-    if current_os == "Windows":
-        win32serviceutil.HandleCommandLine(USBWatcherService)
-    else:
-        # Run directly (Linux/Unix/macOS)
-        threading.Thread(target=schedule_runner, daemon=True).start()
-        threading.Thread(target=ip_monitor_loop, daemon=True).start()
-        linux_monitor_usb()
-
-        while True:
-            time.sleep(1)
